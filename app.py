@@ -1,16 +1,18 @@
 import streamlit as st
 import os
-import google.generativeai as genai
+# Gunakan library integrasi langsung
+from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_community.document_loaders import PyPDFLoader
-
-# Cara import yang lebih aman di tahun 2026:
-try:
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
-except ImportError:
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
+
+# Konfigurasi API Gemini
+if "GEMINI_API_KEY" in st.secrets:
+    api_key = st.secrets["GEMINI_API_KEY"]
+    os.environ["GOOGLE_API_KEY"] = api_key # LangChain butuh ini di env variable
+else:
+    st.error("API Key tidak ditemukan!")
+    st.stop()
 
 # --- CONFIG & API SETUP ---
 st.set_page_config(page_title="PDF AI Chat 2026", layout="wide")
@@ -24,18 +26,18 @@ except:
 
 # --- FUNGSI RAG ---
 def process_pdf(uploaded_file):
-    # Simpan file sementara
     with open("temp.pdf", "wb") as f:
         f.write(uploaded_file.getbuffer())
     
-    # Load & Split
     loader = PyPDFLoader("temp.pdf")
-    data = loader.load()
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    chunks = text_splitter.split_documents(data)
+    pages = loader.load()
     
-    # Embeddings & Vector Store
-    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = text_splitter.split_documents(pages)
+    
+    # Ganti ini agar lebih stabil
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+    
     vectorstore = Chroma.from_documents(documents=chunks, embedding=embeddings)
     return vectorstore
 
