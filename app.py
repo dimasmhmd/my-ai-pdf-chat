@@ -1,16 +1,14 @@
-import subprocess
-import sys
-
-# Cetak daftar library yang terinstal ke log
-# (Bisa dilihat di panel 'Manage App' Streamlit)
-result = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True)
-print(result.stdout)
-
 import streamlit as st
 import os
 import google.generativeai as genai
 from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+# Cara import yang lebih aman di tahun 2026:
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
