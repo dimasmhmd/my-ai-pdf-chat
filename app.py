@@ -1,3 +1,11 @@
+import subprocess
+import sys
+
+# Cetak daftar library yang terinstal ke log
+# (Bisa dilihat di panel 'Manage App' Streamlit)
+result = subprocess.run([sys.executable, "-m", "pip", "freeze"], capture_output=True, text=True)
+print(result.stdout)
+
 import streamlit as st
 import os
 import google.generativeai as genai
