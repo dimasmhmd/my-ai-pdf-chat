@@ -74,24 +74,31 @@ if prompt := st.chat_input("Tanya isi PDF..."):
                 docs = st.session_state.vectorstore.similarity_search(prompt, k=3)
                 context = "\n\n".join([doc.page_content for doc in docs])
                 
-                # Gunakan ChatGoogleGenerativeAI (LangChain wrapper)
-                # Jika gemini-1.5-flash error, dia otomatis coba gemini-pro
-                try:
-                    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-                    full_prompt = f"Gunakan info ini: {context}\n\nJawab pertanyaan: {prompt}"
-                    response = llm.invoke(full_prompt)
-                    answer = response.content
-                except:
-                    # Backup ke model pro jika flash tidak ditemukan di region tersebut
-                    llm = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0)
-                    response = llm.invoke(full_prompt)
-                    answer = response.content
+                full_prompt = f"Gunakan info ini: {context}\n\nJawab pertanyaan: {prompt}"
                 
-                st.markdown(answer)
-                st.session_state.messages.append({"role": "assistant", "content": answer})
+                # --- FIX 404: Mencoba beberapa variasi nama model ---
+                success = False
+                # Daftar kemungkinan nama model yang diterima di berbagai region
+                model_names = ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro"]
+                
+                for m_name in model_names:
+                    try:
+                        llm = ChatGoogleGenerativeAI(
+                            model=m_name, 
+                            temperature=0,
+                            # Memaksa menggunakan API versi 1 (Stable) bukan v1beta
+                            client_options={"api_version": "v1"} 
+                        )
+                        response = llm.invoke(full_prompt)
+                        answer = response.content
+                        st.markdown(answer)
+                        st.session_state.messages.append({"role": "assistant", "content": answer})
+                        success = True
+                        break # Berhenti jika berhasil
+                    except Exception as e:
+                        continue # Coba model berikutnya jika gagal
+                
+                if not success:
+                    st.error("Gagal terhubung ke Google AI. Kemungkinan besar region server Streamlit ini tidak didukung. Coba buat API Key baru atau gunakan VPN saat deploy ulang.")
     else:
-        st.info("Upload PDF dulu di sebelah kiri.")
-
-
-        
-        st.info("Upload PDF dulu di sebelah kiri.")
+        st.info("Upload PDF dulu.")
