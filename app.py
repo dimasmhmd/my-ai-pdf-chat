@@ -1,123 +1,85 @@
 import streamlit as st
 import os
-import google.generativeai as genai
+from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# --- 1. KONFIGURASI HALAMAN ---
-st.set_page_config(
-    page_title="AI PDF Chatbot 2026",
-    page_icon="📄",
-    layout="wide"
-)
+# --- 1. KONFIGURASI ---
+st.set_page_config(page_title="AI PDF Chatbot 2026", page_icon="📄")
+st.title("📄 AI PDF Explorer (Stable Version)")
 
-# --- 2. PENGATURAN API KEY ---
-# Mengambil API Key dari Streamlit Secrets
 if "GEMINI_API_KEY" in st.secrets:
-    api_key = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=api_key)
+    os.environ["GOOGLE_API_KEY"] = st.secrets["GEMINI_API_KEY"]
 else:
-    st.error("⚠️ API Key 'GEMINI_API_KEY' tidak ditemukan! Silakan atur di Settings > Secrets.")
+    st.error("Masukkan GEMINI_API_KEY di Secrets!")
     st.stop()
 
-# --- 3. FUNGSI PEMPROSESAN PDF (RAG) ---
+# --- 2. FUNGSI RAG ---
 def process_pdf(uploaded_file):
     try:
-        # Simpan file sementara agar bisa dibaca loader
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.getbuffer())
         
-        # Load PDF menggunakan PyPDF
         loader = PyPDFLoader("temp.pdf")
         pages = loader.load()
         
-        # Split teks menjadi potongan kecil (Chunking)
-        # Agar AI tidak overload dan pencarian lebih akurat
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1000, 
-            chunk_overlap=150
-        )
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
         chunks = text_splitter.split_documents(pages)
         
-        # Inisialisasi Embeddings (Menggunakan HuggingFace agar lebih stabil)
-        # Model ini mengubah teks menjadi koordinat angka (vektor)
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+        # Gunakan HuggingFace untuk embedding agar tidak kena limit API Google di tahap ini
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/text-embedding-004")
         
-        # Simpan ke Vector Store (ChromaDB) di dalam RAM
         vectorstore = Chroma.from_documents(
             documents=chunks, 
             embedding=embeddings,
-            collection_name="pdf_chat_db"
+            collection_name="pdf_store"
         )
         return vectorstore
     except Exception as e:
-        st.error(f"Gagal memproses PDF: {e}")
+        st.error(f"Gagal proses PDF: {e}")
         return None
 
-# --- 4. ANTARMUKA PENGGUNA (UI) ---
-st.title("📄 AI PDF Assistant")
-st.markdown("---")
-
-# Inisialisasi riwayat pesan di Session State
+# --- 3. UI & CHAT ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar untuk area kontrol
 with st.sidebar:
-    st.header("Upload Dokumen")
-    uploaded_pdf = st.file_uploader("Pilih file PDF Anda", type="pdf")
-    
-    if st.button("🚀 Proses Dokumen"):
-        if uploaded_pdf:
-            with st.spinner("Sedang menganalisis isi PDF..."):
-                st.session_state.vectorstore = process_pdf(uploaded_pdf)
-                st.success("Dokumen siap! Silakan bertanya.")
-        else:
-            st.warning("Silakan unggah file PDF dulu.")
-    
-    if st.button("🗑️ Hapus Riwayat Chat"):
-        st.session_state.messages = []
-        st.rerun()
+    st.header("Upload")
+    pdf_file = st.file_uploader("Pilih PDF", type="pdf")
+    if st.button("Proses"):
+        if pdf_file:
+            with st.spinner("Menganalisis..."):
+                st.session_state.vectorstore = process_pdf(pdf_file)
+                st.success("Siap!")
 
-# Menampilkan Riwayat Chat (Gaya Bubble Chat)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- 5. LOGIKA TANYA JAWAB ---
-if prompt := st.chat_input("Tanyakan sesuatu tentang dokumen ini..."):
+if prompt := st.chat_input("Tanya isi PDF..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
     if "vectorstore" in st.session_state:
         with st.chat_message("assistant"):
-            with st.spinner("Mencari jawaban..."):
-                # Retrieval
+            with st.spinner("Berpikir..."):
+                # Cari Konteks
                 docs = st.session_state.vectorstore.similarity_search(prompt, k=4)
                 context = "\n\n".join([doc.page_content for doc in docs])
                 
-                # Generation dengan proteksi Error 404
+                # Panggil Gemini via LangChain (Lebih Stabil)
+                llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0.3)
+                
+                full_prompt = f"Gunakan teks berikut untuk menjawab: {context}\n\nPertanyaan: {prompt}"
+                
                 try:
-                    # Coba gunakan nama model lengkap
-                    model = genai.GenerativeModel('models/gemini-1.5-flash')
-                    
-                    full_prompt = f"Gunakan konteks ini: {context}\n\nPertanyaan: {prompt}"
-                    response = model.generate_content(full_prompt)
-                    
-                    answer = response.text
+                    response = llm.invoke(full_prompt)
+                    answer = response.content
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "assistant", "content": answer})
-                
                 except Exception as e:
-                    # Jika gagal, coba model Pro sebagai cadangan
-                    try:
-                        model_backup = genai.GenerativeModel('models/gemini-1.5-pro')
-                        response = model_backup.generate_content(full_prompt)
-                        st.markdown(response.text)
-                    except:
-                        st.error(f"Pesan Error Asli: {e}")
+                    st.error(f"Error Akhir: {e}")
     else:
-        st.info("Silakan proses dokumen di sidebar dulu ya.")
+        st.info("Upload PDF dulu.")
