@@ -88,50 +88,36 @@ for message in st.session_state.messages:
 
 # --- 5. LOGIKA TANYA JAWAB ---
 if prompt := st.chat_input("Tanyakan sesuatu tentang dokumen ini..."):
-    # Tampilkan input user
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Cek apakah dokumen sudah diproses
     if "vectorstore" in st.session_state:
         with st.chat_message("assistant"):
-            with st.spinner("Mencari jawaban dalam dokumen..."):
-                # 1. Cari potongan teks yang paling relevan (Similarity Search)
+            with st.spinner("Mencari jawaban..."):
+                # Retrieval
                 docs = st.session_state.vectorstore.similarity_search(prompt, k=4)
                 context = "\n\n".join([doc.page_content for doc in docs])
                 
-                # 2. Kirim Instruksi ke Gemini (Generation)
+                # Generation dengan proteksi Error 404
                 try:
+                    # Coba gunakan nama model lengkap
                     model = genai.GenerativeModel('models/gemini-1.5-flash')
-                except:
-                    # Backup jika v1beta minta nama tanpa prefix
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                # Prompt Engineering: Memberi konteks agar AI tidak halusinasi
-                full_prompt = f"""
-                Anda adalah asisten AI yang bertugas membantu menjawab pertanyaan berdasarkan DOKUMEN yang diberikan.
-                
-                ATURAN:
-                1. Gunakan HANYA informasi dari DOKUMEN di bawah ini.
-                2. Jika jawaban tidak ada di dalam dokumen, katakan: "Maaf, informasi tersebut tidak ditemukan dalam dokumen yang Anda unggah."
-                3. Jawablah dengan sopan dan jelas.
-
-                DOKUMEN:
-                {context}
-
-                PERTANYAAN USER: 
-                {prompt}
-                """
-                
-                try:
+                    
+                    full_prompt = f"Gunakan konteks ini: {context}\n\nPertanyaan: {prompt}"
                     response = model.generate_content(full_prompt)
+                    
                     answer = response.text
                     st.markdown(answer)
-                    
-                    # Simpan jawaban assistant ke riwayat
                     st.session_state.messages.append({"role": "assistant", "content": answer})
+                
                 except Exception as e:
-                    st.error(f"Error dari Gemini API: {e}")
+                    # Jika gagal, coba model Pro sebagai cadangan
+                    try:
+                        model_backup = genai.GenerativeModel('models/gemini-1.5-pro')
+                        response = model_backup.generate_content(full_prompt)
+                        st.markdown(response.text)
+                    except:
+                        st.error(f"Pesan Error Asli: {e}")
     else:
-        st.info("💡 Tips: Silakan upload dan klik 'Proses Dokumen' di sidebar terlebih dahulu.")
+        st.info("Silakan proses dokumen di sidebar dulu ya.")
