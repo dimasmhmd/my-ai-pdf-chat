@@ -6,39 +6,46 @@ from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 
-# --- FIX: Inisialisasi API ---
+# --- INISIALISASI ---
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    # LangChain membutuhkan variabel environment ini secara eksplisit
+    # LangChain memerlukan ini di environment
     os.environ["GOOGLE_API_KEY"] = api_key 
-    genai.configure(api_key=api_key)
 else:
     st.error("API Key tidak ditemukan di Streamlit Secrets!")
     st.stop()
 
 def process_pdf(uploaded_file):
-    with open("temp.pdf", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    loader = PyPDFLoader("temp.pdf")
-    pages = loader.load()
-    
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    chunks = text_splitter.split_documents(pages)
-    
-    # --- FIX: Gunakan model embedding yang tepat ---
-    # Tambahkan task_type agar model tahu ini untuk mencari dokumen (Retrieval)
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004", # Versi terbaru & paling stabil di 2026
-        google_api_key=api_key
-    )
-    
-    vectorstore = Chroma.from_documents(
-        documents=chunks, 
-        embedding=embeddings,
-        collection_name="pdf_chat"
-    )
-    return vectorstore
+    try:
+        with open("temp.pdf", "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        
+        loader = PyPDFLoader("temp.pdf")
+        pages = loader.load()
+        
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        chunks = text_splitter.split_documents(pages)
+        
+        # --- PERBAIKAN DI SINI ---
+        # Gunakan model 'text-embedding-004' (standar terbaru)
+        embeddings = GoogleGenerativeAIEmbeddings(
+            model="models/text-embedding-004",
+            google_api_key=api_key
+        )
+        
+        # Tambahkan logs ke terminal Streamlit untuk memantau proses
+        print("Sedang membuat embeddings...")
+        
+        vectorstore = Chroma.from_documents(
+            documents=chunks, 
+            embedding=embeddings,
+            collection_name="pdf_collection"
+        )
+        return vectorstore
+    except Exception as e:
+        # Menampilkan pesan error asli agar kita tahu penyebabnya
+        st.error(f"Gagal memproses dokumen: {str(e)}")
+        return None
 
 # --- FUNGSI RAG ---
 def process_pdf(uploaded_file):
