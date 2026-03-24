@@ -102,7 +102,11 @@ if prompt := st.chat_input("Tanyakan sesuatu tentang dokumen ini..."):
                 context = "\n\n".join([doc.page_content for doc in docs])
                 
                 # 2. Kirim Instruksi ke Gemini (Generation)
-                model = genai.GenerativeModel('gemini-1.5-flash')
+                try:
+                    model = genai.GenerativeModel('models/gemini-1.5-flash')
+                except:
+                    # Backup jika v1beta minta nama tanpa prefix
+                    model = genai.GenerativeModel('gemini-1.5-flash')
                 
                 # Prompt Engineering: Memberi konteks agar AI tidak halusinasi
                 full_prompt = f"""
