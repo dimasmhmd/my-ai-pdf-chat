@@ -62,22 +62,23 @@ if prompt := st.chat_input("Tanya isi PDF..."):
         st.markdown(prompt)
 
     if "vectorstore" in st.session_state:
-        with st.chat_message("assistant"):
-            with st.spinner("Berpikir cepat dengan Groq..."):
-                docs = st.session_state.vectorstore.similarity_search(prompt, k=4)
-                context = "\n\n".join([doc.page_content for doc in docs])
+    with st.chat_message("assistant"):
+        with st.spinner("Berpikir cepat dengan Groq..."):
+            docs = st.session_state.vectorstore.similarity_search(prompt, k=4)
+            context = "\n\n".join([doc.page_content for doc in docs])
+            
+            full_prompt = f"Gunakan info ini: {context}\n\nJawab pertanyaan: {prompt}"
+            
+            # Coba model terbaru, jika gagal coba model versatile
+            try:
+                llm = ChatGroq(model_name="llama-3.1-8b-instant", temperature=0)
+                response = llm.invoke(full_prompt)
+            except:
+                llm = ChatGroq(model_name="llama-3.3-70b-versatile", temperature=0)
+                response = llm.invoke(full_prompt)
                 
-                # Menggunakan Llama 3 (Sangat Cerdas & Cepat)
-                llm = ChatGroq(model_name="llama3-8b-8192", temperature=0)
-                
-                full_prompt = f"Gunakan info ini: {context}\n\nJawab pertanyaan: {prompt}"
-                
-                try:
-                    response = llm.invoke(full_prompt)
-                    answer = response.content
-                    st.markdown(answer)
-                    st.session_state.messages.append({"role": "assistant", "content": answer})
-                except Exception as e:
-                    st.error(f"Error Groq: {e}")
+            answer = response.content
+            st.markdown(answer)
+            st.session_state.messages.append({"role": "assistant", "content": answer})
     else:
         st.info("Upload PDF dulu.")
