@@ -1,113 +1,133 @@
 import streamlit as st
 import os
 import google.generativeai as genai
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
-# --- INISIALISASI ---
+# --- 1. KONFIGURASI HALAMAN ---
+st.set_page_config(
+    page_title="AI PDF Chatbot 2026",
+    page_icon="📄",
+    layout="wide"
+)
+
+# --- 2. PENGATURAN API KEY ---
+# Mengambil API Key dari Streamlit Secrets
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    # LangChain memerlukan ini di environment
-    os.environ["GOOGLE_API_KEY"] = api_key 
+    genai.configure(api_key=api_key)
 else:
-    st.error("API Key tidak ditemukan di Streamlit Secrets!")
+    st.error("⚠️ API Key 'GEMINI_API_KEY' tidak ditemukan! Silakan atur di Settings > Secrets.")
     st.stop()
 
+# --- 3. FUNGSI PEMPROSESAN PDF (RAG) ---
 def process_pdf(uploaded_file):
     try:
+        # Simpan file sementara agar bisa dibaca loader
         with open("temp.pdf", "wb") as f:
             f.write(uploaded_file.getbuffer())
         
+        # Load PDF menggunakan PyPDF
         loader = PyPDFLoader("temp.pdf")
         pages = loader.load()
         
-        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+        # Split teks menjadi potongan kecil (Chunking)
+        # Agar AI tidak overload dan pencarian lebih akurat
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=150
+        )
         chunks = text_splitter.split_documents(pages)
         
-        # --- PERBAIKAN DI SINI ---
-        # Gunakan model 'text-embedding-004' (standar terbaru)
-        embeddings = GoogleGenerativeAIEmbeddings(
-            model="models/text-embedding-004",
-            google_api_key=api_key
-        )
+        # Inisialisasi Embeddings (Menggunakan HuggingFace agar lebih stabil)
+        # Model ini mengubah teks menjadi koordinat angka (vektor)
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         
-        # Tambahkan logs ke terminal Streamlit untuk memantau proses
-        print("Sedang membuat embeddings...")
-        
+        # Simpan ke Vector Store (ChromaDB) di dalam RAM
         vectorstore = Chroma.from_documents(
             documents=chunks, 
             embedding=embeddings,
-            collection_name="pdf_collection"
+            collection_name="pdf_chat_db"
         )
         return vectorstore
     except Exception as e:
-        # Menampilkan pesan error asli agar kita tahu penyebabnya
-        st.error(f"Gagal memproses dokumen: {str(e)}")
+        st.error(f"Gagal memproses PDF: {e}")
         return None
 
-# --- FUNGSI RAG ---
-def process_pdf(uploaded_file):
-    with open("temp.pdf", "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    loader = PyPDFLoader("temp.pdf")
-    pages = loader.load()
-    
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
-    chunks = text_splitter.split_documents(pages)
-    
-    # Ganti ini agar lebih stabil
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    
-    vectorstore = Chroma.from_documents(documents=chunks, embedding=embeddings)
-    return vectorstore
+# --- 4. ANTARMUKA PENGGUNA (UI) ---
+st.title("📄 AI PDF Assistant")
+st.markdown("---")
 
-# --- UI STREAMLIT ---
-st.title("📄 PDF AI Chatbot")
-st.write("Tanya apapun isi dokumenmu dengan bantuan Google Gemini.")
-
+# Inisialisasi riwayat pesan di Session State
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Sidebar untuk Upload
+# Sidebar untuk area kontrol
 with st.sidebar:
     st.header("Upload Dokumen")
-    pdf_file = st.file_uploader("Upload PDF Anda", type="pdf")
-    if st.button("Proses Dokumen"):
-        if pdf_file:
-            st.session_state.vectorstore = process_pdf(pdf_file)
-            st.success("Dokumen berhasil diproses!")
+    uploaded_pdf = st.file_uploader("Pilih file PDF Anda", type="pdf")
+    
+    if st.button("🚀 Proses Dokumen"):
+        if uploaded_pdf:
+            with st.spinner("Sedang menganalisis isi PDF..."):
+                st.session_state.vectorstore = process_pdf(uploaded_pdf)
+                st.success("Dokumen siap! Silakan bertanya.")
         else:
-            st.warning("Silakan upload file dulu.")
+            st.warning("Silakan unggah file PDF dulu.")
+    
+    if st.button("🗑️ Hapus Riwayat Chat"):
+        st.session_state.messages = []
+        st.rerun()
 
-# Menampilkan Chat
+# Menampilkan Riwayat Chat (Gaya Bubble Chat)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Input Chat
-if prompt := st.chat_input("Apa yang ingin kamu tanyakan?"):
+# --- 5. LOGIKA TANYA JAWAB ---
+if prompt := st.chat_input("Tanyakan sesuatu tentang dokumen ini..."):
+    # Tampilkan input user
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Logika Jawaban
+    # Cek apakah dokumen sudah diproses
     if "vectorstore" in st.session_state:
-        # Cari potongan teks relevan
-        docs = st.session_state.vectorstore.similarity_search(prompt, k=3)
-        context = "\n".join([d.page_content for d in docs])
-        
-        # Kirim ke Gemini
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        full_prompt = f"Gunakan info ini untuk menjawab: {context}\n\nPertanyaan: {prompt}"
-        
-        response = model.generate_content(full_prompt)
-        answer = response.text
-    else:
-        answer = "Silakan upload dan proses dokumen PDF terlebih dahulu di sidebar."
+        with st.chat_message("assistant"):
+            with st.spinner("Mencari jawaban dalam dokumen..."):
+                # 1. Cari potongan teks yang paling relevan (Similarity Search)
+                docs = st.session_state.vectorstore.similarity_search(prompt, k=4)
+                context = "\n\n".join([doc.page_content for doc in docs])
+                
+                # 2. Kirim Instruksi ke Gemini (Generation)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                # Prompt Engineering: Memberi konteks agar AI tidak halusinasi
+                full_prompt = f"""
+                Anda adalah asisten AI yang bertugas membantu menjawab pertanyaan berdasarkan DOKUMEN yang diberikan.
+                
+                ATURAN:
+                1. Gunakan HANYA informasi dari DOKUMEN di bawah ini.
+                2. Jika jawaban tidak ada di dalam dokumen, katakan: "Maaf, informasi tersebut tidak ditemukan dalam dokumen yang Anda unggah."
+                3. Jawablah dengan sopan dan jelas.
 
-    with st.chat_message("assistant"):
-        st.markdown(answer)
-        st.session_state.messages.append({"role": "assistant", "content": answer})
+                DOKUMEN:
+                {context}
+
+                PERTANYAAN USER: 
+                {prompt}
+                """
+                
+                try:
+                    response = model.generate_content(full_prompt)
+                    answer = response.text
+                    st.markdown(answer)
+                    
+                    # Simpan jawaban assistant ke riwayat
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"Error dari Gemini API: {e}")
+    else:
+        st.info("💡 Tips: Silakan upload dan klik 'Proses Dokumen' di sidebar terlebih dahulu.")
