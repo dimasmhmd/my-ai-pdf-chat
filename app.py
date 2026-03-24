@@ -1,28 +1,44 @@
 import streamlit as st
 import os
-# Gunakan library integrasi langsung
-from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+import google.generativeai as genai
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 
-# Konfigurasi API Gemini
+# --- FIX: Inisialisasi API ---
 if "GEMINI_API_KEY" in st.secrets:
     api_key = st.secrets["GEMINI_API_KEY"]
-    os.environ["GOOGLE_API_KEY"] = api_key # LangChain butuh ini di env variable
+    # LangChain membutuhkan variabel environment ini secara eksplisit
+    os.environ["GOOGLE_API_KEY"] = api_key 
+    genai.configure(api_key=api_key)
 else:
-    st.error("API Key tidak ditemukan!")
+    st.error("API Key tidak ditemukan di Streamlit Secrets!")
     st.stop()
 
-# --- CONFIG & API SETUP ---
-st.set_page_config(page_title="PDF AI Chat 2026", layout="wide")
-
-# Mengambil API Key dari secrets (Streamlit Cloud)
-try:
-    GOOGLE_API_KEY = st.secrets["GEMINI_API_KEY"]
-    genai.configure(api_key=GOOGLE_API_KEY)
-except:
-    st.error("API Key tidak ditemukan! Pastikan sudah diatur di Secrets.")
+def process_pdf(uploaded_file):
+    with open("temp.pdf", "wb") as f:
+        f.write(uploaded_file.getbuffer())
+    
+    loader = PyPDFLoader("temp.pdf")
+    pages = loader.load()
+    
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=100)
+    chunks = text_splitter.split_documents(pages)
+    
+    # --- FIX: Gunakan model embedding yang tepat ---
+    # Tambahkan task_type agar model tahu ini untuk mencari dokumen (Retrieval)
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/text-embedding-004", # Versi terbaru & paling stabil di 2026
+        google_api_key=api_key
+    )
+    
+    vectorstore = Chroma.from_documents(
+        documents=chunks, 
+        embedding=embeddings,
+        collection_name="pdf_chat"
+    )
+    return vectorstore
 
 # --- FUNGSI RAG ---
 def process_pdf(uploaded_file):
